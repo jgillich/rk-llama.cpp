@@ -9,6 +9,7 @@
 #include <array>
 #include <cinttypes>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <future>
 #include <regex>
@@ -1028,10 +1029,27 @@ static bool weight_buft_supported(const llama_hparams & hparams, ggml_tensor * w
 // find the first buffer type in the list that can use the tensor
 static ggml_backend_buffer_type_t select_weight_buft(const llama_hparams & hparams, ggml_tensor * tensor, ggml_op op, const buft_list_t * buft_list) {
     GGML_ASSERT(!buft_list->empty());
+
+    static bool dbg = std::getenv("RKNPU_DBG") != nullptr;
+
+    if (dbg) {
+        std::fprintf(stderr, "RKNPU_DBG select_buft: --- tensor=%s op=%s type=%s ne=[%lld,%lld,%lld,%lld] buft_list_size=%zu ---\n",
+            tensor->name[0] ? tensor->name : "(null)", ggml_op_name(op), ggml_type_name(tensor->type),
+            (long long)tensor->ne[0], (long long)tensor->ne[1], (long long)tensor->ne[2], (long long)tensor->ne[3],
+            buft_list->size());
+    }
+
     for (const auto & cur : *buft_list) {
         ggml_backend_dev_t cur_dev = cur.first;
         ggml_backend_buffer_type_t cur_buft = cur.second;
-        if (weight_buft_supported(hparams, tensor, op, cur_buft, cur_dev)) {
+        bool supported = weight_buft_supported(hparams, tensor, op, cur_buft, cur_dev);
+        if (dbg) {
+            std::fprintf(stderr, "RKNPU_DBG select_buft:   try dev=%s buft=%s -> %s\n",
+                ggml_backend_dev_name(cur_dev),
+                ggml_backend_buft_name(cur_buft),
+                supported ? "ACCEPT" : "reject");
+        }
+        if (supported) {
             return cur_buft;
         }
     }
