@@ -1,18 +1,11 @@
 #include "ggml-impl.h"
-#include "ggml.h"
 
 #include "rknpu2-configuration.h"
 
 #include <algorithm>
 #include <arm_neon.h>
 #include <cstdlib>
-#include <cstdio>
 #include <sstream>
-
-static bool rknpu_dbg_enabled() {
-    static bool dbg = std::getenv("RKNPU_DBG") != nullptr;
-    return dbg;
-}
 
 namespace {
     // Function for parsing ENV variable
@@ -84,12 +77,6 @@ const Rknpu2HardwarePipeline* Rknpu2DeviceConfig::resolve_op_support(const struc
 
     // If no pattern is registered for this type and no global override exists, reject operation
     if (!pattern_ptr || pattern_ptr->empty()) {
-        if (rknpu_dbg_enabled()) {
-            std::string name = w_tensor->name[0] ? w_tensor->name : "";
-            if (name.empty()) name = "ptr_" + std::to_string(reinterpret_cast<uintptr_t>(w_tensor));
-            std::fprintf(stderr, "RKNPU_DBG resolve_op: REJECT no_pattern name=%s type=%s use_custom=%d\n",
-                name.c_str(), ggml_type_name(w_tensor->type), (int)use_custom_pattern);
-        }
         return nullptr;
     }
 
@@ -105,10 +92,8 @@ const Rknpu2HardwarePipeline* Rknpu2DeviceConfig::resolve_op_support(const struc
     }
 
     // Assigning the next sequence number if this tensor is seen for the first time
-    bool new_tensor = false;
     if (tensor_sequence_map.find(name) == tensor_sequence_map.end()) {
         tensor_sequence_map[name] = global_tensor_counter++;
-        new_tensor = true;
     }
 
     // Selecting the pipeline cyclically based on the defined pattern
@@ -117,13 +102,6 @@ const Rknpu2HardwarePipeline* Rknpu2DeviceConfig::resolve_op_support(const struc
 
     const std::string& selected_pipeline = pattern[pattern_idx];
     const auto* pipeline = find_pipeline(selected_pipeline);
-
-    if (rknpu_dbg_enabled()) {
-        std::fprintf(stderr, "RKNPU_DBG resolve_op: name=%s type=%s seq_id=%d new=%d pattern_idx=%zu/%zu -> %s (%s)\n",
-            name.c_str(), ggml_type_name(w_tensor->type),
-            seq_id, (int)new_tensor, pattern_idx, pattern.size(),
-            selected_pipeline.c_str(), pipeline ? "found" : "MISSING");
-    }
 
     // If no hardware pipeline exists with this name, reject operation
     if (!pipeline) {

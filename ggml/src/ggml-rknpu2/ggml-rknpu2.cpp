@@ -13,7 +13,6 @@
 #include <omp.h>
 
 #include <cassert>
-#include <cstdio>
 #include <cstring>
 #include <mutex>
 #include <string>
@@ -469,8 +468,6 @@ static std::shared_ptr<rknn_tensor_mem> get_tensor_buffer(
 static enum ggml_status ggml_backend_rknpu_graph_compute(ggml_backend_t backend, struct ggml_cgraph* cgraph) {
     auto* backend_ctx = (ggml_backend_rknpu_context*)backend->context;
 
-    static bool dbg = std::getenv("RKNPU_DBG") != nullptr;
-
     // Getting the current device configuration once
     const auto& config = rknpu2_configuration::Rknpu2ConfigManager::get_instance().get_current_config();
 
@@ -486,15 +483,8 @@ static enum ggml_status ggml_backend_rknpu_graph_compute(ggml_backend_t backend,
         const int K = (int)src0->ne[0];
         const int N = (int)src0->ne[1];
 
-        if (dbg) {
-            std::fprintf(stderr, "RKNPU_DBG graph_compute: MUL_MAT node=%d name=%s M=%d K=%d N=%d src0_type=%s src1_type=%s\n",
-                node_i, src0->name[0] ? src0->name : "(null)", M, K, N,
-                ggml_type_name(src0->type), ggml_type_name(src1->type));
-        }
-
         // Skipping zero-dimension matmuls
         if (M == 0 || K == 0 || N == 0) {
-            if (dbg) std::fprintf(stderr, "RKNPU_DBG graph_compute:   skip zero_dim\n");
             continue;
         }
 
@@ -505,13 +495,7 @@ static enum ggml_status ggml_backend_rknpu_graph_compute(ggml_backend_t backend,
         }
 
         const auto* pipeline = config.resolve_op_support(src0);
-        if (!pipeline) {
-            if (dbg) std::fprintf(stderr, "RKNPU_DBG graph_compute:   skip no_pipeline\n");
-            continue;
-        }
-
-        if (dbg) std::fprintf(stderr, "RKNPU_DBG graph_compute:   pipeline=%s is_hadamard=%d\n",
-            pipeline->pipeline_name.c_str(), (int)pipeline->use_hadamard);
+        if (!pipeline) continue;
 
         // Initializing Hadamard Transform Logic
         const bool is_hadamard = (pipeline->use_hadamard);
@@ -533,13 +517,7 @@ static enum ggml_status ggml_backend_rknpu_graph_compute(ggml_backend_t backend,
             if (seg.size_n > 0) active_n_segments.push_back(seg);
         }
 
-        if (active_n_segments.empty()) {
-            if (dbg) std::fprintf(stderr, "RKNPU_DBG graph_compute:   skip empty_n_segments\n");
-            continue;
-        }
-
-        if (dbg) std::fprintf(stderr, "RKNPU_DBG graph_compute:   RUN n_segs=%zu k_segs=%zu\n",
-            active_n_segments.size(), all_k_segments.size());
+        if (active_n_segments.empty()) continue;
 
         // Initializing variables
         const size_t num_active_segments = active_n_segments.size();
@@ -1291,8 +1269,6 @@ static void ggml_backend_rknpu_device_get_props(ggml_backend_dev_t dev, struct g
 static bool ggml_backend_rknpu_device_supports_op(ggml_backend_dev_t dev, const struct ggml_tensor * op) {
     UNUSED(dev);
 
-    static bool dbg = std::getenv("RKNPU_DBG") != nullptr;
-
     // Getting the current device configuration
     const auto& config = rknpu2_configuration::Rknpu2ConfigManager::get_instance().get_current_config();
 
@@ -1304,72 +1280,46 @@ static bool ggml_backend_rknpu_device_supports_op(ggml_backend_dev_t dev, const 
             const struct ggml_tensor * src0 = op->src[0]; // Weights
             const struct ggml_tensor * src1 = op->src[1]; // Activations
 
-            if (dbg) {
-                std::fprintf(stderr, "RKNPU_DBG supports_op: name=%s op=%s src0[type=%s ne=[%lld,%lld,%lld,%lld] cont=%d] src1[type=%s ne=[%lld,%lld,%lld,%lld] cont=%d]\n",
-                    src0->name[0] ? src0->name : "(null)", ggml_op_name(op->op),
-                    ggml_type_name(src0->type),
-                    (long long)src0->ne[0], (long long)src0->ne[1], (long long)src0->ne[2], (long long)src0->ne[3],
-                    (int)ggml_is_contiguous(src0),
-                    ggml_type_name(src1->type),
-                    (long long)src1->ne[0], (long long)src1->ne[1], (long long)src1->ne[2], (long long)src1->ne[3],
-                    (int)ggml_is_contiguous(src1));
-            }
-
             // Searching for available hardware pipeline for this tensor
             const auto* pipeline = config.resolve_op_support(src0);
             if (!pipeline) {
-                if (dbg) std::fprintf(stderr, "RKNPU_DBG supports_op:   REJECT no_pipeline\n");
                 return false;
             }
 
             // Rejecting zero-dimension ops
             if (src0->ne[0] == 0 || src0->ne[1] == 0 ||
                 src1->ne[0] == 0 || src1->ne[1] == 0) {
-                if (dbg) std::fprintf(stderr, "RKNPU_DBG supports_op:   REJECT zero_dim\n");
                 return false;
             }
 
             // Checking if activation type matches the supported operation
             if (src1->type != GGML_TYPE_F32) {
-                if (dbg) std::fprintf(stderr, "RKNPU_DBG supports_op:   REJECT src1_type=%s (!= F32)\n", ggml_type_name(src1->type));
                 return false;
             }
 
             // Checking for K alignment
             if (src0->ne[0] % pipeline->k_align != 0) {
-                if (dbg) std::fprintf(stderr, "RKNPU_DBG supports_op:   REJECT k_align K=%lld %% k_align=%d != 0\n",
-                    (long long)src0->ne[0], pipeline->k_align);
                 return false;
             }
 
             // Checking for N alignment
             if (src0->ne[1] % pipeline->n_align != 0) {
-                if (dbg) std::fprintf(stderr, "RKNPU_DBG supports_op:   REJECT n_align N=%lld %% n_align=%d != 0\n",
-                    (long long)src0->ne[1], pipeline->n_align);
                 return false;
             }
 
             // Checking for exact dimensions
             if (src1->ne[0] != src0->ne[0]) {
-                if (dbg) std::fprintf(stderr, "RKNPU_DBG supports_op:   REJECT dim_mismatch src1->ne[0]=%lld != src0->ne[0]=%lld\n",
-                    (long long)src1->ne[0], (long long)src0->ne[0]);
-                return false;
+                 return false;
             }
 
             // Checking contiguous memory
             if (!ggml_is_contiguous(src0) || !ggml_is_contiguous(src1)) {
-                if (dbg) std::fprintf(stderr, "RKNPU_DBG supports_op:   REJECT non_contiguous src0_cont=%d src1_cont=%d\n",
-                    (int)ggml_is_contiguous(src0), (int)ggml_is_contiguous(src1));
                 return false;
             }
 
-            if (dbg) std::fprintf(stderr, "RKNPU_DBG supports_op:   ACCEPT pipeline=%s k_align=%d n_align=%d\n",
-                pipeline->pipeline_name.c_str(), pipeline->k_align, pipeline->n_align);
             return true;
         }
         default:
-            if (dbg) std::fprintf(stderr, "RKNPU_DBG supports_op: REJECT unsupported_op=%s name=%s\n",
-                ggml_op_name(op->op), (op->src[0] && op->src[0]->name[0]) ? op->src[0]->name : "(null)");
             return false;
     }
 }

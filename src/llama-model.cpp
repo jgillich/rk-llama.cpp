@@ -20,7 +20,6 @@
 #include <cassert>
 #include <cfloat>
 #include <cstdint>
-#include <cstdio>
 #include <cstring>
 #include <cmath>
 #include <functional>
@@ -185,8 +184,6 @@ static llama_rope_scaling_type llama_rope_scaling_type_from_string(const std::st
 static buft_list_t make_cpu_buft_list(const std::vector<ggml_backend_dev_t> & devices, bool use_extra_bufts, bool no_host) {
     buft_list_t buft_list;
 
-    static bool dbg = std::getenv("RKNPU_DBG") != nullptr;
-
     // add ACCEL buffer types
     for (size_t i = 0; i < ggml_backend_dev_count(); ++i) {
         ggml_backend_dev_t dev = ggml_backend_dev_get(i);
@@ -195,8 +192,6 @@ static buft_list_t make_cpu_buft_list(const std::vector<ggml_backend_dev_t> & de
             // skip
             if (buft != ggml_backend_cpu_buffer_type()) {
                 buft_list.emplace_back(dev, buft);
-                if (dbg) std::fprintf(stderr, "RKNPU_DBG make_cpu_buft_list: +ACCEL dev=%s buft=%s\n",
-                    ggml_backend_dev_name(dev), ggml_backend_buft_name(buft));
             }
         }
     }
@@ -212,8 +207,6 @@ static buft_list_t make_cpu_buft_list(const std::vector<ggml_backend_dev_t> & de
             ggml_backend_buffer_type_t buft = ggml_backend_dev_host_buffer_type(dev);
             if (buft) {
                 buft_list.emplace_back(dev, buft);
-                if (dbg) std::fprintf(stderr, "RKNPU_DBG make_cpu_buft_list: +HOST dev=%s buft=%s\n",
-                    ggml_backend_dev_name(dev), ggml_backend_buft_name(buft));
                 break;
             }
         }
@@ -233,8 +226,6 @@ static buft_list_t make_cpu_buft_list(const std::vector<ggml_backend_dev_t> & de
             ggml_backend_buffer_type_t * extra_bufts = ggml_backend_dev_get_extra_bufts_fn(cpu_dev);
             while (extra_bufts && *extra_bufts) {
                 buft_list.emplace_back(cpu_dev, *extra_bufts);
-                if (dbg) std::fprintf(stderr, "RKNPU_DBG make_cpu_buft_list: +EXTRA dev=%s buft=%s\n",
-                    ggml_backend_dev_name(cpu_dev), ggml_backend_buft_name(*extra_bufts));
                 ++extra_bufts;
             }
         }
@@ -245,13 +236,8 @@ static buft_list_t make_cpu_buft_list(const std::vector<ggml_backend_dev_t> & de
         ggml_backend_dev_t dev = ggml_backend_dev_get(i);
         if (ggml_backend_dev_type(dev) == GGML_BACKEND_DEVICE_TYPE_CPU) {
             buft_list.emplace_back(dev, ggml_backend_dev_buffer_type(dev));
-            if (dbg) std::fprintf(stderr, "RKNPU_DBG make_cpu_buft_list: +CPU dev=%s buft=%s\n",
-                ggml_backend_dev_name(dev), ggml_backend_buft_name(ggml_backend_dev_buffer_type(dev)));
         }
     }
-
-    if (dbg) std::fprintf(stderr, "RKNPU_DBG make_cpu_buft_list: total=%zu use_extra_bufts=%d no_host=%d devices=%zu\n",
-        buft_list.size(), (int)use_extra_bufts, (int)no_host, devices.size());
 
     return buft_list;
 }
